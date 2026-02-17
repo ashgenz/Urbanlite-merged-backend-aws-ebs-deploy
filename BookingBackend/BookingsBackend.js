@@ -260,7 +260,7 @@ const Booking = mongoose.model("Booking", BookingSchema);
 function calculatePrice(booking) {
   // ✅ TRIAL FEAST — fixed backend price
   if (booking.MonthlyOrOneTime === "Trial Feast") {
-    return 249;
+    return 299;
   }
 
   const isMonthly = booking.MonthlyOrOneTime === "Monthly";
