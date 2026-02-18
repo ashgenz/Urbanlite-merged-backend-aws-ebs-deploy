@@ -514,7 +514,7 @@ const __dirname = path.dirname(__filename);
 
 // The Force Download Route
 app.get('/download-app', (req, res) => {
-    const filePath = path.join(__dirname, 'public', 'urbanLite.apk');
+    const filePath = path.join(__dirname, 'public', 'urbanLite-1.0.0.apk');
     
     res.download(filePath, 'UrbanLite.apk', (err) => {
         if (err) {
