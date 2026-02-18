@@ -527,6 +527,21 @@ app.get('/download-app', (req, res) => {
     });
 });
 
+
+app.get('/download-app-worker', (req, res) => {
+    const filePath = path.join(__dirname, 'public', 'urbanLite.apk');
+    
+    res.download(filePath, 'workerApp1.apk', (err) => {
+        if (err) {
+            console.error("Download error:", err);
+            // If the file isn't found, send a clear message
+            if (!res.headersSent) {
+                res.status(404).send("Apk file not found on server.");
+            }
+        }
+    });
+});
+
 // Customer bookings
 app.get("/api/user/bookings", verifyToken, async (req, res) => {
   try {
