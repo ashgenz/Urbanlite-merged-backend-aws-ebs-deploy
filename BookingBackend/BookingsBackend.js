@@ -516,7 +516,7 @@ const __dirname = path.dirname(__filename);
 app.get('/download-app', (req, res) => {
     const filePath = path.join(__dirname, 'public', 'urbanLite-1.0.0.apk');
     
-    res.download(filePath, 'UrbanLite.apk', (err) => {
+    res.download(filePath, 'urbanLite-1.0.0.apk', (err) => {
         if (err) {
             console.error("Download error:", err);
             // If the file isn't found, send a clear message
