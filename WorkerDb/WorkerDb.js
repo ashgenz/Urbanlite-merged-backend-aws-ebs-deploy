@@ -220,6 +220,9 @@ app.get("/api/worker/wallet/transactions", verifyToken, async (req, res) => {
 //   });
 // }
 // await worker.save();
+app.get('/ping', (req, res) => {
+  res.status(200).send('Pong');
+});
 
 
 // Worker Commission Settlement API
