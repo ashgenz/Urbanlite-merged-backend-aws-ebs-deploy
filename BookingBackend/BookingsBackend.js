@@ -258,27 +258,28 @@ const Booking = mongoose.model("Booking", BookingSchema);
 //   return Math.round(total);
 // }
 function calculatePrice(booking) {
-  // ✅ TRIAL FEAST — fixed backend price
   if (booking.MonthlyOrOneTime === "Trial Feast") {
     return 299;
   }
 
   const isMonthly = booking.MonthlyOrOneTime === "Monthly";
-  // ✅ Pricing Config (Matches Frontend exactly)
   const unit = { room: 13, kitchen: 15, hall: 15, toilet: 35, bartan: 1.5, meal: 25, naashta: 15 };
   const packageRates = { bhk1: 1300, bhk2: 1700, bhk3: 2100, bhk4: 2300 };
 
   const months = Number(booking.Months) || 1;
-  const days = isMonthly ? 30 * months : 1;
+
+  // 1. Normalize Services Array
+  const services = (booking.services && booking.services.length > 0) ? booking.services : [booking];
+  
+  // 2. Identify what's in the bundle
+  const hasJhadu = services.some(s => s.WorkName === "Jhadu Pocha");
+  const hasCook = services.some(s => s.WorkName === "Cook Service");
+  const standaloneBartanObj = services.find(s => s.WorkName === "Bartan Service");
+
+  // A main service exists if Cook or Jhadu is present
+  const hasMainService = hasJhadu || hasCook;
 
   let total = 0;
-
-  // 🔍 CHECK: Is there a "Main Service" (Cook or Jhadu)?
-  // If yes, Bartan is an "Add-on" and we SKIP the minimum price floor.
-  const services = booking.services || [];
-  const hasMainService = services.some(s => 
-    s.WorkName === "Jhadu Pocha" || s.WorkName === "Cook Service"
-  );
 
   for (const srv of services) {
     switch (srv.WorkName) {
@@ -286,33 +287,25 @@ function calculatePrice(booking) {
       // --- 1. JHADU POCHA ---
       case "Jhadu Pocha": {
         let jhaduFrequency = srv.JhaduFrequency;
-        // Default frequency logic
         if (isMonthly && !jhaduFrequency) {
            jhaduFrequency = booking.WhichPlan === "Premium" ? "Daily" : "Alternate day";
         }
 
-        // Factor: Alternate = 0.75, Daily = 1.0
         let jhaduFactor = 1.0;
-        if (isMonthly && jhaduFrequency === "Alternate day") {
+        if (isMonthly && (jhaduFrequency === "Alternate day" || jhaduFrequency === "Alternate")) {
             jhaduFactor = 0.75;
         }
 
         let monthlyBase = 0;
-
-        // A. Try explicit FlatType (e.g. "2BHK")
         if (srv.FlatType && srv.FlatType !== "Custom") {
             const key = "bhk" + srv.FlatType.charAt(0);
             if (packageRates[key]) monthlyBase = packageRates[key];
         }
 
-        // B. Infer Package from Room Counts (Fixes the ₹15 diff)
-        // If FlatType is missing/custom but counts match standard flats, use Package Rate.
         if (monthlyBase === 0 && isMonthly) {
              const r = Number(srv.NoOfRooms || 0);
              const k = Number(srv.NoOfKitchen || 0);
              const h = Number(srv.HallSize || 0);
-             
-             // Standard config usually has 1 Kitchen + 1 Hall
              if (k === 1 && h === 1) {
                  if (r === 1) monthlyBase = packageRates.bhk1; 
                  else if (r === 2) monthlyBase = packageRates.bhk2; 
@@ -321,14 +314,10 @@ function calculatePrice(booking) {
              }
         }
 
-        // C. Fallback to Granular Custom Calculation
         if (monthlyBase === 0) {
-            const dailySum = (
-              (Number(srv.NoOfRooms) || 0) * unit.room +
-              (Number(srv.NoOfKitchen) || 0) * unit.kitchen +
-              (Number(srv.HallSize) || 0) * unit.hall
-            );
-            monthlyBase = dailySum * 30;
+            monthlyBase = ((Number(srv.NoOfRooms) || 0) * unit.room +
+                           (Number(srv.NoOfKitchen) || 0) * unit.kitchen +
+                           (Number(srv.HallSize) || 0) * unit.hall) * 30;
         }
 
         total += monthlyBase * jhaduFactor * months;
@@ -338,42 +327,34 @@ function calculatePrice(booking) {
       // --- 2. TOILET CLEANING ---
       case "Toilet Cleaning": {
         const freq = srv.FrequencyPerWeek || "Twice a week";
-        let visits = 0;
-
+        let visits = 1;
         if (isMonthly) {
-            if (freq === "Twice a week") visits = 8;
-            if (freq === "Thrice a week") visits = 12;
-        } else {
-            visits = 1;
+            visits = (freq.includes("Thrice") || freq === "Thrice") ? 12 : 8;
         }
-
-        total += (srv.NoOfToilets || 0) * unit.toilet * visits * months;
+        total += (Number(srv.NoOfToilets) || 0) * unit.toilet * visits * months;
         break;
       }
 
-      // --- 3. BARTAN SERVICE ---
+      // --- 3. STANDALONE BARTAN SERVICE ---
       case "Bartan Service": {
+        // If Cook is present, we handle Bartan inside the Cook logic to avoid double charging.
+        // We skip this block ONLY if Cook is handling it.
+        if (hasCook) break; 
+
         const freq = srv.FrequencyPerDay || "Once a day";
-        let visits = 0;
+        let visits = 1;
 
         if (isMonthly) {
-            if (freq === "Once a day") visits = 30;
-            if (freq === "Twice a day") visits = 60;
-        } else {
-            visits = 1;
+            visits = (freq.includes("Twice")) ? 60 : 30;
         }
 
-        // Raw Calculation
-        let bartanTotal = (srv.AmountOfBartan || 0) * unit.bartan * visits * months;
+        const count = Math.max(10, Number(srv.AmountOfBartan) || 0);
+        let bartanTotal = count * unit.bartan * visits * months;
 
-        // ✅ CONDITIONAL FLOOR PRICE
-        // Only apply 800/1400 floor if this is a Standalone Bartan booking
+        // Apply floor ONLY if no main service (Cook/Jhadu) is present
         if (isMonthly && !hasMainService) {
-            const freqFactor = (freq === "Twice a day" || freq === "Twice") ? 2 : 1;
-            const minMonthly = freqFactor === 2 ? 1400 : 800;
-            const floorPrice = minMonthly * months;
-            
-            bartanTotal = Math.max(bartanTotal, floorPrice);
+            const minMonthly = (freq.includes("Twice")) ? 1400 : 800;
+            bartanTotal = Math.max(bartanTotal, minMonthly * months);
         }
         
         total += bartanTotal;
@@ -402,17 +383,24 @@ function calculatePrice(booking) {
         }
 
         // C. Bartan (Inside Cook)
-        const hasBartan = srv.IncludeBartan || (srv.Bartan && (srv.Bartan.include || srv.Bartan.mealBartan));
+        // Check if Bartan is requested either via Cook.IncludeBartan or a standalone Bartan object in the array
+        const hasBartanAddon = srv.IncludeBartan || (srv.Bartan && (srv.Bartan.include || srv.Bartan.mealBartan)) || standaloneBartanObj;
         
-        if (hasBartan) {
+        if (hasBartanAddon) {
+           // 1. Base Utensils (Plates from the meal)
            const bTiers = { p1: 270, p2: 400, p3: 540, per_head_bulk: 170 };
            if (people === 1) monthlyCookPrice += bTiers.p1;
            else if (people === 2) monthlyCookPrice += bTiers.p2;
            else if (people === 3) monthlyCookPrice += bTiers.p3;
            else monthlyCookPrice += people * bTiers.per_head_bulk;
            
-           // Extra Bartan
-           const extraCount = Number(srv.Bartan?.extraBartan || srv.AmountOfBartan || 0);
+           // 2. Extra Utensils (Pots/Pans)
+           // Look in the Cook object first, then fallback to the standalone Bartan object
+           let extraCount = Number(srv.Bartan?.extraBartan || srv.AmountOfBartan || 0);
+           if (extraCount === 0 && standaloneBartanObj) {
+               extraCount = Number(standaloneBartanObj.AmountOfBartan || 0);
+           }
+
            if (extraCount > 0) {
               monthlyCookPrice += (extraCount * unit.bartan * 30);
            }
@@ -514,24 +502,9 @@ const __dirname = path.dirname(__filename);
 
 // The Force Download Route
 app.get('/download-app', (req, res) => {
-    const filePath = path.join(__dirname, 'public', 'urbanLite-1.0.0.apk');
-    
-    res.download(filePath, 'urbanLite-1.0.0.apk', (err) => {
-        if (err) {
-            console.error("Download error:", err);
-            // If the file isn't found, send a clear message
-            if (!res.headersSent) {
-                res.status(404).send("Apk file not found on server.");
-            }
-        }
-    });
-});
-
-
-app.get('/download-app-worker', (req, res) => {
     const filePath = path.join(__dirname, 'public', 'urbanLite.apk');
     
-    res.download(filePath, 'workerApp1.apk', (err) => {
+    res.download(filePath, 'UrbanLite.apk', (err) => {
         if (err) {
             console.error("Download error:", err);
             // If the file isn't found, send a clear message
@@ -541,6 +514,8 @@ app.get('/download-app-worker', (req, res) => {
         }
     });
 });
+
+
 
 // Customer bookings
 app.get("/api/user/bookings", verifyToken, async (req, res) => {
