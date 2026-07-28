@@ -23,7 +23,7 @@ console.log(process.env.MONGO_URI_CUSTOMERS);
 const { default: app } = await import("./app.js");
 await import("./config/database.js");
 
-const PORT = process.env.PORT || 80;
+const PORT = process.env.PORT || 8080;
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 UrbanLite running on port ${PORT}`);
