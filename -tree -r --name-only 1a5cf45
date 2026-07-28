@@ -1,0 +1,27 @@
+[33mcommit 1a5cf4512b938a8c7ed0b240fd7599ebe68e5084[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m)[m
+Author: Ashish Sharma <as9875147324@gmail.com>
+Date:   Tue Jul 28 15:59:51 2026 +0530
+
+    D
+
+ .dockerignore                                      |    5 [32m+[m
+ .ebignore                                          |    4 [32m+[m
+ .gitignore                                         |    3 [32m+[m
+ BookingBackend/.env                                |    4 [31m-[m
+ BookingBackend/package.json                        |   34 [31m-[m
+ BookingBackend/public/urbanLite-1.0.0.apk          |  Bin [31m74268982[m -> [32m0[m bytes
+ BookingBackend/public/urbanLite.apk                |  Bin [31m74268982[m -> [32m0[m bytes
+ Dockerfile                                         |   13 [32m+[m
+ LoginsBackend/.env                                 |   15 [31m-[m
+ LoginsBackend/package.json                         |   35 [31m-[m
+ WorkerDb/.env                                      |    5 [31m-[m
+ package-lock.json                                  | 1784 [32m++++++++++++++++++++[m
+ WorkerDb/package.json => package.json              |   14 [32m+[m[31m-[m
+ src/app.js                                         |   30 [32m+[m
+ src/config/database.js                             |   51 [32m+[m
+ .../LoginsBackend.js => src/routes/auth.js         |  111 [32m+[m[31m-[m
+ .../BookingsBackend.js => src/routes/booking.js    |   30 [32m+[m[31m-[m
+ WorkerDb/WorkerDb.js => src/routes/worker.js       |   27 [32m+[m[31m-[m
+ src/server.js                                      |   30 [32m+[m
+ {BookingBackend => src/utils}/priceConfig.js       |    0
+ 20 files changed, 2021 insertions(+), 174 deletions(-)
