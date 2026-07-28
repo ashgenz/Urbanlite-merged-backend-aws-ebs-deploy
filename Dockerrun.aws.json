@@ -1,13 +1,8 @@
 {
   "AWSEBDockerrunVersion": "1",
-  "Image": {
-    "Name": "as9875147324/urbanlite-backend:latest"
-  },
   "Ports": [
     {
-      "ContainerPort": 5000,
-      "HostPort": 5000
+      "ContainerPort": "5000"
     }
-  ],
-  "Logging": "/var/log/app"
+  ]
 }
