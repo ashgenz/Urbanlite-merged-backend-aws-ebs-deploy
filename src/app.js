@@ -6,7 +6,9 @@ const app = express();
 global.app = app;
 
 app.use(express.json());
-
+app.get("/", (req, res) => {
+  res.status(200).send("UrbanLite Backend Running");
+});
 const allowedOrigins = [""];
 
 app.use(
