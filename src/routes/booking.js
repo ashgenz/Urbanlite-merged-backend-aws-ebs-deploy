@@ -1,0 +1,881 @@
+// server.js
+import dotenv from "dotenv";
+dotenv.config();
+
+import express from "express";
+import mongoose from "mongoose";
+import cors from "cors";
+import jwt from "jsonwebtoken";
+
+import axios from "axios";
+import { UNIT_PRICES } from "../utils/priceConfig.js";
+
+import { bookingDB } from "../config/database.js";
+
+
+// const app = express();
+const app = global.app;
+// app.use(cors());
+// app.use(express.json({ limit: "200kb" }));
+
+const JWT_KEY = process.env.JWT_KEY;
+const MONGO_URI = process.env.MONGO_URI_BOOKINGS;
+console.log(process.env.MONGO_URI_BOOKINGS);
+const PORT = process.env.PORTBOOKINGS;
+const PORTWORKER = process.env.PORTWORKER;
+
+// ------------------------
+// MongoDB Connection
+// ------------------------
+// mongoose
+//   .connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+//   .then(() => console.log("✅ Connected to MongoDB"))
+//   .catch((err) => {
+//     console.error("❌ MongoDB connection failed:", err.message);
+//     process.exit(1);
+//   });
+
+// ------------------------
+// Booking Schema
+// ------------------------
+const BookingSchema = new mongoose.Schema(
+  {
+    bookingId: { type: String, required: true, unique: true },
+    IdCustomer: { type: String, required: true, index: true },
+    IdWorker: { type: String, default: "" },
+    WorkerName: { type: String, default: "" },  // 🔹 Add this
+
+    TempPhoneCustomer: { type: String, default: "unknown" },
+    TempPhoneWorker: { type: String, default: "unknown" },
+
+    address: { type: String, default: "" },
+    WorkName: { type: String, required: true },
+
+    services: [ /* … same as before … */ ],
+
+    MonthlyOrOneTime: { type: String, default: "Monthly" },
+    WhichPlan: { type: String, default: "Standard" },
+    Date: { type: Date, default: Date.now },
+
+    status: {
+      type: String,
+      enum: ["open", "accepted", "rejected", "completed","cancelled"],
+      default: "open",
+    },
+
+    acceptedBy: { type: String, default: "" },
+    rejectedBy: [{ type: String }],
+    EstimatedPrice: { type: Number, required: true },
+
+payment: {
+  status: {
+    type: String,
+    enum: ["pending", "paid", "failed"],
+    default: "pending",
+  },
+  mode: {
+    type: String,
+    enum: ["online", "cash"],
+    default: "cash",
+  },
+  paidBy: {
+    type: String,
+    enum: ["customer_to_us", "customer_to_worker"],
+    default: "customer_to_us",
+  },
+  cancelledAt: { type: Date },
+  transactionId: { type: String, default: "" },
+  paidAt: { type: Date },
+
+  // 🔹 Commission sub-document
+  commission: {
+    amount: { type: Number, default: 0 },
+    isSettled: { type: Boolean, default: false },
+    settledAt: { type: Date },
+  },
+},
+
+  },
+  { timestamps: true }
+);
+BookingSchema.pre("save", function (next) {
+  if (!this.payment) this.payment = {};
+  if (!this.payment.commission) {
+    this.payment.commission = { amount: 0, isSettled: false };
+  }
+  next();
+});
+
+
+
+
+BookingSchema.index({ status: 1, createdAt: -1 });
+const Booking = bookingDB.model("Booking", BookingSchema);
+
+
+// ------------------------
+// Pricing logic
+// ------------------------
+
+// server.js
+
+// ... (previous code before calculatePrice)
+// function calculatePrice(booking) {
+//   // ✅ TRIAL FEAST — fixed backend price
+//   if (booking.MonthlyOrOneTime === "Trial Feast") {
+//     return 299; // single source of truth
+//   }
+//   const isMonthly = booking.MonthlyOrOneTime === "Monthly";
+//   const unit = UNIT_PRICES[booking.MonthlyOrOneTime] || UNIT_PRICES.Monthly;
+//   const days = isMonthly ? 30 * (booking.Months || 1) : 1;
+
+//   let total = 0;
+
+//   for (const srv of booking.services || []) {
+//     switch (srv.WorkName) {
+
+//       case "Jhadu Pocha": {
+//         let jhaduFrequency = srv.JhaduFrequency;
+//         let jhaduFactor = 1;
+
+//         if (isMonthly) {
+//           if (!jhaduFrequency) {
+//             jhaduFrequency =
+//               booking.WhichPlan === "Premium" ? "Daily" :
+//               booking.WhichPlan === "Standard" ? "Alternate day" :
+//               "Alternate day";
+//           }
+//           jhaduFactor = jhaduFrequency === "Alternate day" ? 0.5 : 1;
+//         }
+
+//         total += (
+//           (srv.NoOfRooms || 0) * unit.room +
+//           (srv.NoOfKitchen || 0) * unit.kitchen +
+//           (srv.HallSize || 0) * unit.hall
+//         ) * jhaduFactor * days;
+
+//         break;
+//       }
+
+//       case "Toilet Cleaning": {
+//         let toiletFreq = srv.FrequencyPerWeek;
+//         let toiletFactor = 1;
+
+//         if (isMonthly) {
+//           if (!toiletFreq) {
+//             toiletFreq =
+//               booking.WhichPlan === "Custom"
+//                 ? booking.FrequencyPerWeek || "Twice a week"
+//                 : "Twice a week";
+//           }
+
+//           toiletFactor = 0;
+//           if (toiletFreq === "Twice a week") toiletFactor = 2 / 7;
+//           else if (toiletFreq === "Thrice a week") toiletFactor = 3 / 7;
+//         }
+
+//         total += (srv.NoOfToilets || 0) * unit.toilet * toiletFactor * days;
+//         break;
+//       }
+
+//       case "Bartan Service": {
+//         let bartanFreq = srv.FrequencyPerDay;
+//         let bartanFactor = 1;
+
+//         if (isMonthly) {
+//           if (!bartanFreq) {
+//             bartanFreq =
+//               booking.WhichPlan === "Premium" ? "Twice a day" :
+//               booking.WhichPlan === "Standard" ? "Once a day" :
+//               booking.FrequencyPerDay;
+//           }
+//         }
+//         bartanFactor = bartanFreq === "Twice" ? 2 : 1;
+
+//         total += (srv.AmountOfBartan || 0) * unit.bartan * bartanFactor * days;
+//         break;
+//       }
+
+// case "Cook Service": {
+//   const mealsPerDay = srv.FrequencyPerDay === "Twice" ? 2 : 1;
+
+//   // People count (default = 1 just like frontend)
+//   const people = Number(srv.NoOfPeople) || 1;
+
+//   // --- Meals ---
+//   const mealCost = people * mealsPerDay * unit.meal;
+
+//   // --- Naashta ---
+//   const naashtaCost = srv.IncludeNaashta
+//     ? people * unit.naashta
+//     : 0;
+
+//   // --- Bartan ---
+//   let bartanCost = 0;
+
+//   // Determine whether the booking includes Bartan (explicit flag OR Bartan object)
+//   const includeBartan = !!srv.IncludeBartan || !!srv.Bartan;
+
+//   if (includeBartan) {
+//     // mealBartan is utensils coming from the meals themselves
+//     const mealBartan = people * mealsPerDay;
+
+//     // Prefer explicit AmountOfBartan (from schema). Use it only if it's defined (could be 0).
+//     // Otherwise fall back to srv.Bartan?.extraBartan (frontend may send this).
+//     const extraBartanFromAmountField =
+//       typeof srv.AmountOfBartan !== "undefined" ? Number(srv.AmountOfBartan) : null;
+
+//     const extraBartanFallback = Number(srv.Bartan?.extraBartan || 0);
+
+//     // final extraBartan to use:
+//     const extraBartan =
+//       extraBartanFromAmountField !== null ? extraBartanFromAmountField : extraBartanFallback;
+
+//     // total utensils = meal utensils + extra utensils
+//     const totalUtensils = mealBartan + extraBartan;
+
+//     // multiply by unit price per utensil
+//     bartanCost = totalUtensils * unit.bartan;
+//   } else {
+//     bartanCost = 0;
+//   }
+
+
+
+
+
+
+//   const subtotal = (mealCost + naashtaCost + bartanCost) * days;
+
+//   total += Math.round(subtotal);
+//   break;
+// }
+
+
+//       default:
+//         break;
+//     }
+//   }
+
+//   return Math.round(total);
+// }
+function calculatePrice(booking) {
+  if (booking.MonthlyOrOneTime === "Trial Feast") {
+    return 299;
+  }
+
+  const isMonthly = booking.MonthlyOrOneTime === "Monthly";
+  const unit = { room: 13, kitchen: 15, hall: 15, toilet: 35, bartan: 1.5, meal: 25, naashta: 15 };
+  const packageRates = { bhk1: 1300, bhk2: 1700, bhk3: 2100, bhk4: 2300 };
+
+  const months = Number(booking.Months) || 1;
+
+  // 1. Normalize Services Array
+  const services = (booking.services && booking.services.length > 0) ? booking.services : [booking];
+  
+  // 2. Identify what's in the bundle
+  const hasJhadu = services.some(s => s.WorkName === "Jhadu Pocha");
+  const hasCook = services.some(s => s.WorkName === "Cook Service");
+  const standaloneBartanObj = services.find(s => s.WorkName === "Bartan Service");
+
+  // A main service exists if Cook or Jhadu is present
+  const hasMainService = hasJhadu || hasCook;
+
+  let total = 0;
+
+  for (const srv of services) {
+    switch (srv.WorkName) {
+
+      // --- 1. JHADU POCHA ---
+      case "Jhadu Pocha": {
+        let jhaduFrequency = srv.JhaduFrequency;
+        if (isMonthly && !jhaduFrequency) {
+           jhaduFrequency = booking.WhichPlan === "Premium" ? "Daily" : "Alternate day";
+        }
+
+        let jhaduFactor = 1.0;
+        if (isMonthly && (jhaduFrequency === "Alternate day" || jhaduFrequency === "Alternate")) {
+            jhaduFactor = 0.75;
+        }
+
+        let monthlyBase = 0;
+        if (srv.FlatType && srv.FlatType !== "Custom") {
+            const key = "bhk" + srv.FlatType.charAt(0);
+            if (packageRates[key]) monthlyBase = packageRates[key];
+        }
+
+        if (monthlyBase === 0 && isMonthly) {
+             const r = Number(srv.NoOfRooms || 0);
+             const k = Number(srv.NoOfKitchen || 0);
+             const h = Number(srv.HallSize || 0);
+             if (k === 1 && h === 1) {
+                 if (r === 1) monthlyBase = packageRates.bhk1; 
+                 else if (r === 2) monthlyBase = packageRates.bhk2; 
+                 else if (r === 3) monthlyBase = packageRates.bhk3; 
+                 else if (r === 4) monthlyBase = packageRates.bhk4; 
+             }
+        }
+
+        if (monthlyBase === 0) {
+            monthlyBase = ((Number(srv.NoOfRooms) || 0) * unit.room +
+                           (Number(srv.NoOfKitchen) || 0) * unit.kitchen +
+                           (Number(srv.HallSize) || 0) * unit.hall) * 30;
+        }
+
+        total += monthlyBase * jhaduFactor * months;
+        break;
+      }
+
+      // --- 2. TOILET CLEANING ---
+      case "Toilet Cleaning": {
+        const freq = srv.FrequencyPerWeek || "Twice a week";
+        let visits = 1;
+        if (isMonthly) {
+            visits = (freq.includes("Thrice") || freq === "Thrice") ? 12 : 8;
+        }
+        total += (Number(srv.NoOfToilets) || 0) * unit.toilet * visits * months;
+        break;
+      }
+
+      // --- 3. STANDALONE BARTAN SERVICE ---
+      case "Bartan Service": {
+        // If Cook is present, we handle Bartan inside the Cook logic to avoid double charging.
+        // We skip this block ONLY if Cook is handling it.
+        if (hasCook) break; 
+
+        const freq = srv.FrequencyPerDay || "Once a day";
+        let visits = 1;
+
+        if (isMonthly) {
+            visits = (freq.includes("Twice")) ? 60 : 30;
+        }
+
+        const count = Math.max(10, Number(srv.AmountOfBartan) || 0);
+        let bartanTotal = count * unit.bartan * visits * months;
+
+        // Apply floor ONLY if no main service (Cook/Jhadu) is present
+        if (isMonthly && !hasMainService) {
+            const minMonthly = (freq.includes("Twice")) ? 1400 : 800;
+            bartanTotal = Math.max(bartanTotal, minMonthly * months);
+        }
+        
+        total += bartanTotal;
+        break;
+      }
+
+      // --- 4. COOK SERVICE ---
+      case "Cook Service": {
+        const people = Math.max(1, Number(srv.NoOfPeople) || 1);
+        let monthlyCookPrice = 0;
+
+        // A. Food Cost
+        const foodTiers = { p1: 2400, p2: 3600, p3: 4600, per_head_bulk: 1400 };
+        if (people === 1) monthlyCookPrice += foodTiers.p1;
+        else if (people === 2) monthlyCookPrice += foodTiers.p2;
+        else if (people === 3) monthlyCookPrice += foodTiers.p3;
+        else monthlyCookPrice += people * foodTiers.per_head_bulk;
+
+        // B. Naashta
+        if (srv.IncludeNaashta) {
+           const bfTiers = { p1: 800, p2: 1050, p3: 1300, per_head_bulk: 425 };
+           if (people === 1) monthlyCookPrice += bfTiers.p1;
+           else if (people === 2) monthlyCookPrice += bfTiers.p2;
+           else if (people === 3) monthlyCookPrice += bfTiers.p3;
+           else monthlyCookPrice += people * bfTiers.per_head_bulk;
+        }
+
+        // C. Bartan (Inside Cook)
+        // Check if Bartan is requested either via Cook.IncludeBartan or a standalone Bartan object in the array
+        const hasBartanAddon = srv.IncludeBartan || (srv.Bartan && (srv.Bartan.include || srv.Bartan.mealBartan)) || standaloneBartanObj;
+        
+        if (hasBartanAddon) {
+           // 1. Base Utensils (Plates from the meal)
+           const bTiers = { p1: 270, p2: 400, p3: 540, per_head_bulk: 170 };
+           if (people === 1) monthlyCookPrice += bTiers.p1;
+           else if (people === 2) monthlyCookPrice += bTiers.p2;
+           else if (people === 3) monthlyCookPrice += bTiers.p3;
+           else monthlyCookPrice += people * bTiers.per_head_bulk;
+           
+           // 2. Extra Utensils (Pots/Pans)
+           // Look in the Cook object first, then fallback to the standalone Bartan object
+           let extraCount = Number(srv.Bartan?.extraBartan || srv.AmountOfBartan || 0);
+           if (extraCount === 0 && standaloneBartanObj) {
+               extraCount = Number(standaloneBartanObj.AmountOfBartan || 0);
+           }
+
+           if (extraCount > 0) {
+              monthlyCookPrice += (extraCount * unit.bartan * 30);
+           }
+        }
+
+        if (srv.FrequencyPerDay === "Once") {
+           monthlyCookPrice = monthlyCookPrice * 0.6;
+        }
+
+        total += Math.round(monthlyCookPrice * months);
+        break;
+      }
+      
+      default:
+        break;
+    }
+  }
+
+  return Math.round(total);
+}
+
+// ... (rest of server.js)
+
+// BookingsBackend.js - Add at the top with other constants
+const TELEGRAM_BOT_TOKEN = "8147796035:AAGJZ6shtCn9EHnfJRYQif_qL59AvX8zSNA";
+const TELEGRAM_CHAT_ID = "1191606191";
+const IGNORED_USERS = [
+    "694a74b2715e94872a6c1014", // Lakshsay
+    // "68a348119b318dfb5e2cc90d", // Ashish
+    "6952c2a1715e94872a6c102a"  // Girishma
+];
+
+
+const sendTelegramAlert = async (bookingDetails) => {
+  try {
+    // 1. Manually encode the message to match your working browser URL
+    const message = `🚀 New UrbanLite Booking!\n\n` +
+      `🆔 ID: ${bookingDetails.bookingId}\n` +
+      `📍 Address: ${bookingDetails.address || "N/A"}\n` +
+      `🛠 Service: ${bookingDetails.WorkName || "N/A"}\n` +
+      `💰 Price: ₹${bookingDetails.EstimatedPrice || 0}\n` +
+      `📅 Date: ${new Date(bookingDetails.Date).toLocaleDateString()}`;
+
+    // 2. Use the exact working base URL from your test
+    const token = "8147796035:AAGJZ6shtCn9EHnfJRYQif_qL59AvX8zSNA";
+    const chatId = "1191606191";
+    
+    // 3. Construct the full URL just like the one you pasted
+    const url = `https://api.telegram.org/bot${token}/sendMessage?chat_id=${chatId}&text=${encodeURIComponent(message)}`;
+
+    // 4. Use axios.get (matching the browser's behavior) instead of axios.post
+    await axios.get(url);
+    
+    console.log("✅ Telegram Notification Sent via Working URL");
+  } catch (error) {
+    console.error("❌ Telegram Alert Failed:", error.response?.data || error.message);
+  }
+};
+
+
+// ------------------------
+// JWT Middleware
+// ------------------------
+function verifyToken(req, res, next) {
+  const authHeader = req.headers["authorization"];
+  const token = authHeader?.split(" ")[1];
+
+  if (!token) return res.status(401).json({ message: "No token" });
+
+  jwt.verify(token, JWT_KEY, (err, decoded) => {
+    if (err) return res.status(403).json({ message: "Invalid token" });
+    req.user = decoded;
+    next();
+  });
+}
+
+// ------------------------
+// Routes
+// ------------------------
+
+// Dev token (testing)
+app.post("/api/dev/token", (req, res) => {
+  const id = req.body?.id || "demoWorker123";
+  const role = req.body?.role || "worker"; // default to worker
+  const token = jwt.sign({ id, role }, JWT_KEY, { expiresIn: "7d" });
+  res.json({ token });
+});
+
+
+
+
+
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Manually define __dirname for ES Modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// The Force Download Route
+app.get('/download-app', (req, res) => {
+    const filePath = path.join(__dirname, 'public', 'urbanLite.apk');
+    
+    res.download(filePath, 'UrbanLite.apk', (err) => {
+        if (err) {
+            console.error("Download error:", err);
+            // If the file isn't found, send a clear message
+            if (!res.headersSent) {
+                res.status(404).send("Apk file not found on server.");
+            }
+        }
+    });
+});
+
+
+
+// Customer bookings
+app.get("/api/user/bookings", verifyToken, async (req, res) => {
+  try {
+    const bookings = await Booking.find({ IdCustomer: req.user.id }).sort({ createdAt: -1 });
+    res.json(bookings);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+// ------------------------------------------
+// Cancel Booking (User) - DELETE
+// ------------------------------------------
+// app.delete("/api/user/bookings/:id", verifyToken, async (req, res) => {
+//   try {
+//     const booking = await Booking.findById(req.params.id);
+
+//     if (!booking)
+//       return res.status(404).json({ message: "Booking not found" });
+
+//     // Allow cancellation only if user owns it
+//     if (booking.IdCustomer !== req.user.id)
+//       return res.status(403).json({ message: "Unauthorized to cancel this booking" });
+
+//     // Restrict cancellation after payment or acceptance
+//     if (booking.payment?.status === "paid")
+//       return res.status(400).json({ message: "Cannot cancel a paid booking" });
+//     if (booking.status === "accepted")
+//       return res.status(400).json({ message: "Cannot cancel after worker has accepted" });
+
+//     await Booking.findByIdAndDelete(req.params.id);
+
+//     res.json({ success: true, message: "Booking cancelled successfully" });
+//   } catch (err) {
+//     console.error("Cancel booking error:", err.message);
+//     res.status(500).json({ message: "Server error while cancelling booking" });
+//   }
+// });
+// PATCH /api/user/bookings/:id/cancel
+app.patch("/api/user/bookings/:id/cancel",verifyToken, async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ message: "Booking not found" });
+
+    // Ensure only the customer who created it can cancel
+    if (booking.IdCustomer.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+
+    if (booking.status === "cancelled") {
+      return res.status(400).json({ message: "Booking already cancelled" });
+    }
+
+    booking.status = "cancelled";
+    booking.cancelledAt = new Date();
+    await booking.save();
+
+    // Optional: Notify worker via socket/email/push later
+    res.json({ message: "Booking cancelled successfully", booking });
+  } catch (err) {
+    console.error("Cancel booking error:", err);
+    res.status(500).json({ message: "Server error while cancelling booking" });
+  }
+});
+
+// Admin → all bookings
+app.get("/api/admin/bookings", async (req, res) => {
+  try {
+    const bookings = await Booking.find().sort({ createdAt: -1 });
+    res.json(bookings);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Worker → only open bookings (exclude ones they already rejected)
+app.get("/api/worker/bookings/open", verifyToken, async (req, res) => {
+  try {
+    const bookings = await Booking.find({
+      status: "open",
+      rejectedBy: { $ne: req.user.id },
+    }).sort({ createdAt: -1 });
+    res.json(bookings);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Worker accept booking
+// Worker accepts a booking — fetch worker info from Worker service via axios
+app.post("/api/worker/bookings/:id/accept", verifyToken, async (req, res) => {
+  try {
+    // call Worker service to get worker details (name)
+    // worker service runs on port 8000 in your setup
+    const workerServiceUrl = `https://urbanlite-backends-pd2g.onrender.com/workers/${req.user.id}`;
+    console.log(PORTWORKER)
+    let workerResp;
+    try {
+      workerResp = await axios.get(workerServiceUrl);
+    } catch (err) {
+      // If worker service returns 404 or is down, surface a clear error
+      console.error("Worker service error:", err?.response?.data || err.message);
+      return res.status(500).json({ message: "Failed to fetch worker info" });
+    }
+
+    const worker = workerResp.data;
+    if (!worker) {
+      return res.status(404).json({ message: "Worker not found in worker service" });
+    }
+
+    // Update booking with worker ID + name. Only accept if booking is still open.
+    const booking = await Booking.findOneAndUpdate(
+      { _id: req.params.id, status: "open" },
+      {
+        status: "accepted",
+        IdWorker: req.user.id,
+        acceptedBy: req.user.id,
+        WorkerName: worker.name || "",
+      },
+      { new: true }
+    );
+
+    if (!booking) return res.status(400).json({ message: "Booking not available" });
+
+    // Ensure payment + commission shape exists before sending response
+    if (!booking.payment) booking.payment = {};
+    if (!booking.payment.commission) booking.payment.commission = { amount: 0, isSettled: false };
+
+    res.json({
+      success: true,
+      booking: {
+        ...booking.toObject(),
+        payment: { ...booking.payment, method: booking.payment.mode }, // frontend compat
+      },
+    });
+  } catch (err) {
+    console.error("Accept booking error:", err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+// Worker → all bookings for this worker
+app.get("/api/worker/bookings/all", verifyToken, async (req, res) => {
+  try {
+    const bookings = await Booking.find({
+      IdWorker: req.user.id,
+      status: { $in: ["accepted", "cancelled"] } // or include "open" if needed
+    }).sort({ createdAt: -1 });
+    res.json(bookings);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+
+// Worker → accepted bookings (only for this worker)
+app.get("/api/worker/bookings/accepted", verifyToken, async (req, res) => {
+  try {
+    const bookings = await Booking.find({
+      status: "accepted",
+      IdWorker: req.user.id,
+    }).sort({ createdAt: -1 });
+
+    res.json(bookings);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Worker reject booking
+// app.post("/api/worker/bookings/:id/reject", verifyToken, async (req, res) => {
+//   try {
+//     const booking = await Booking.findOneAndUpdate(
+//       { _id: req.params.id, status: "open" },
+//       { $addToSet: { rejectedBy: req.user.id } }, // worker added to rejected list
+//       { new: true }
+//     );
+//     if (!booking) return res.status(400).json({ message: "Booking not available" });
+//     res.json(booking);
+//   } catch (err) {
+//     res.status(500).json({ message: err.message });
+//   }
+// });
+
+// Keep-Alive Endpoint
+app.get('/ping', (req, res) => {
+  res.status(200).send('Pong');
+});
+
+// User creates booking 
+// User creates booking 
+app.post("/api/user/book", verifyToken, async (req, res) => {
+  try {
+    const data = Array.isArray(req.body) ? req.body : [req.body];
+
+    const bookings = await Booking.insertMany(
+      data.map((item) => {
+        const EstimatedPrice = calculatePrice(item); 
+        return {
+          ...item,
+          bookingId: `bk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          IdCustomer: req.user.id,
+          EstimatedPrice,
+        };
+      })
+    );
+
+    // Filter out team members
+    const isTestUser = IGNORED_USERS.includes(req.user.id);
+
+    if (!isTestUser) {
+        bookings.forEach(booking => {
+            // Trigger Telegram alert instead of (or alongside) WhatsApp
+            sendTelegramAlert(booking).catch(err => console.error("Telegram Send Failed:", err.message));
+        });
+    }
+
+    res.status(201).json(bookings);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+
+
+
+app.post("/api/user/bookings/:id/pay", verifyToken, async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ message: "Booking not found" });
+
+    // ensure payment object exists
+    if (!booking.payment) booking.payment = {};
+    if (!booking.payment.commission) booking.payment.commission = { amount: 0, isSettled: false };
+
+    // prevent double payment
+    if (booking.payment.status === "paid") {
+      return res.status(400).json({ message: "Booking already paid" });
+    }
+
+    const { method } = req.body; // "to_platform" or "to_worker"
+    booking.payment.status = "paid";
+    booking.payment.mode = method === "to_platform" ? "online" : "cash";
+    booking.payment.paidBy = method === "to_platform" ? "customer_to_us" : "customer_to_worker";
+    booking.payment.paidAt = new Date();
+
+    await booking.save();
+
+    // If payment goes through platform and worker exists, update worker wallet
+    if (method === "to_platform" && booking.IdWorker) {
+      try {
+        const payout = Math.round(booking.EstimatedPrice * 0.8);
+        const commission = Math.round(booking.EstimatedPrice * 0.2);
+
+        await axios.post("https://urbanlite-backends-pd2g.onrender.com/api/internal/worker/update-wallet", {
+          workerId: booking.IdWorker,
+          payout,
+          commission,
+          bookingId: booking.bookingId,
+        });
+
+        return res.json({
+          success: true,
+          message: `Payment recorded, ₹${payout} credited to worker, commission ₹${commission} kept by platform`,
+          booking: { ...booking.toObject(), payment: { ...booking.payment, method: booking.payment.mode } },
+        });
+      } catch (err) {
+        console.error("❌ Worker service update failed:", err.message);
+        return res.status(500).json({
+          message: "Booking saved but failed to update worker balance",
+          booking: { ...booking.toObject(), payment: { ...booking.payment, method: booking.payment.mode } },
+        });
+      }
+    }
+
+    // if method === "to_worker" (cash to worker)
+    res.json({
+      success: true,
+      message: "Payment recorded successfully",
+      booking: { ...booking.toObject(), payment: { ...booking.payment, method: booking.payment.mode } },
+    });
+  } catch (err) {
+    console.error("Pay route error:", err.message);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+
+
+
+// BookingsBackend.js
+app.post("/api/worker/bookings/:id/pay-commission", verifyToken, async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ message: "Booking not found" });
+
+    // Ensure payment structure exists
+    if (!booking.payment) booking.payment = {};
+    if (!booking.payment.commission)
+      booking.payment.commission = { amount: 0, isSettled: false, settledAt: null };
+
+    // 🚫 Already settled
+    if (booking.payment.commission.isSettled) {
+      return res.status(400).json({ message: "Commission already settled" });
+    }
+
+    // 🚫 No worker assigned
+    if (!booking.IdWorker) {
+      return res.status(400).json({ message: "Booking has no assigned worker" });
+    }
+
+    // 💰 Commission = 20% of EstimatedPrice
+    const commission = Math.round(booking.EstimatedPrice * 0.2);
+
+    // 🔄 Deduct from worker wallet via Worker Service
+    try {
+      await axios.post(`https://urbanlite-backends-pd2g.onrender.com/api/internal/worker/pay-commission`, {
+        workerId: booking.IdWorker,
+        amount: commission,
+        bookingId: booking.bookingId,
+      });
+    } catch (err) {
+      console.error("Worker pay-commission call failed:", err?.response?.data || err.message);
+      return res.status(500).json({ message: "Failed to deduct commission from worker wallet" });
+    }
+
+    // ✅ Update booking.payment & commission details
+    booking.payment.commission.amount = commission;
+    booking.payment.commission.isSettled = true;
+    booking.payment.commission.settledAt = new Date();
+
+    // ✅ Also mark payment as 'paid' since full transaction (customer→us & worker→us) done
+    booking.payment.status = "paid";
+    booking.payment.paidAt = booking.payment.paidAt || new Date();
+
+    // 🔐 Keep mode and paidBy consistent
+    booking.payment.mode = booking.payment.mode || "online";
+    booking.payment.paidBy = booking.payment.paidBy || "customer_to_us";
+
+    await booking.save();
+
+    res.json({
+      success: true,
+      message: "Commission settled and payment marked as paid successfully",
+      booking: {
+        ...booking.toObject(),
+        payment: { ...booking.payment, method: booking.payment.mode },
+      },
+    });
+  } catch (err) {
+    console.error("❌ Commission settlement failed:", err.message);
+    res.status(500).json({ message: "Failed to settle commission" });
+  }
+});
+
+
+
+
+// ------------------------
+// Start server
+// ------------------------
+// app.listen(PORT, '0.0.0.0', () => console.log(`Server listening on 0.0.0.0:${PORT}`));
