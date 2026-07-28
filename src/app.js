@@ -6,8 +6,13 @@ const app = express();
 global.app = app;
 
 app.use(express.json());
+// Put this right above your database connections or other routes
 app.get("/", (req, res) => {
-  res.status(200).send("UrbanLite Backend Running");
+  res.status(200).send("OK");
+});
+
+app.get("/health", (req, res) => {
+  res.status(200).send("Healthy");
 });
 const allowedOrigins = [""];
 
