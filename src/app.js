@@ -14,15 +14,20 @@ app.get("/", (req, res) => {
 app.get("/health", (req, res) => {
   res.status(200).send("Healthy");
 });
-const allowedOrigins = [""];
+const allowedOrigins = [
+  "http://localhost:3000",
+  "http://localhost:5173",
+  // add your frontend production URL here when ready
+];
 
 app.use(
   cors({
     origin(origin, callback) {
+      // Allow requests with no origin (like mobile apps, curl, or AWS health checkers)
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
-        callback(null, true);
+        callback(new Error("Not allowed by CORS"));
       }
     },
     credentials: true,
