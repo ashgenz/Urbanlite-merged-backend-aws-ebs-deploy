@@ -5,8 +5,8 @@
   },
   "Ports": [
     {
-      "ContainerPort": 5000,
-      "HostPort": 5000
+      "ContainerPort": 8080,
+      "HostPort": 8080
     }
   ],
   "Logging": "/var/log/app"
