@@ -6,7 +6,7 @@
   "Ports": [
     {
       "ContainerPort": 5000,
-      "HostPort": 5000
+      "HostPort": 80
     }
   ],
   "Logging": "/var/log/app"
