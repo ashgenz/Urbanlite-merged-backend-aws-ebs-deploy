@@ -71,15 +71,7 @@ const UserSchema = new mongoose.Schema({
   
   // 4. Store the unique Google ID to prevent duplicate accounts
   googleId: { type: String, unique: true, sparse: true },
-  createdAt: {
-    type: String, // Changed to String to store formatted IST time
-    default: () => {
-      return new Date().toLocaleString("en-IN", {
-        timeZone: "Asia/Kolkata",
-        // optional: customize format if needed
-      });
-    }
-  },
+ 
   
   // 5. Useful for tracking how the user joined
   authMethod: { type: String, enum: ['local', 'google'], default: 'local' },
