@@ -72,11 +72,13 @@ const UserSchema = new mongoose.Schema({
   // 4. Store the unique Google ID to prevent duplicate accounts
   googleId: { type: String, unique: true, sparse: true },
   createdAt: {
-    type: Date,
-    default: Date.now,
-    get: (val) => {
-      if (!val) return val;
-      return val.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+    type: String, 
+    default: () => {
+      // Safe factory function executed only when a document is created
+      return new Date().toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        hour12: true,
+      });
     }
   },
   
