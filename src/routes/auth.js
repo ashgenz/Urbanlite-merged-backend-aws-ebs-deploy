@@ -72,12 +72,11 @@ const UserSchema = new mongoose.Schema({
   // 4. Store the unique Google ID to prevent duplicate accounts
   googleId: { type: String, unique: true, sparse: true },
   createdAt: {
-    type: String, // Changed to String to store formatted IST time
-    default: () => {
-      return new Date().toLocaleString("en-IN", {
-        timeZone: "Asia/Kolkata",
-        // optional: customize format if needed
-      });
+    type: Date,
+    default: Date.now,
+    get: (val) => {
+      if (!val) return val;
+      return val.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
     }
   },
   
@@ -407,6 +406,8 @@ app.get("/verify", verifyToken, async (req, res) => {
     // Fetch fresh data from DB using the ID from the token
     const user = await User.findById(req.user.id).select("-Password"); 
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    
+
     
     res.json({ success: true, user });
   } catch (err) {
