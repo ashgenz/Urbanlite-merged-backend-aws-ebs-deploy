@@ -25,6 +25,6 @@ await import("./config/database.js");
 
 const PORT = process.env.PORT || 8080;
 
-app.listen(PORT , "0.0.0.0", () => {
+app.listen(PORT , () => {
   console.log(`🚀 UrbanLite running on port ${PORT}`);
 });

@@ -1,13 +1,12 @@
 {
   "AWSEBDockerrunVersion": "1",
   "Image": {
-    "Name": "as9875147324/urbanlite-backend:latest"
+    "Name": "ashgenz/urbanlite-backend:latest",
+    "Update": "true"
   },
   "Ports": [
     {
-      "ContainerPort": 8080,
-      "HostPort": 8080
+      "ContainerPort": 8080
     }
-  ],
-  "Logging": "/var/log/app"
+  ]
 }
